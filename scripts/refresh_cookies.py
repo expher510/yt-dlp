@@ -1,3 +1,6 @@
+import sys
+sys.stdout.reconfigure(encoding="utf-8")
+
 import asyncio
 import os
 import sys
@@ -10,7 +13,7 @@ async def extract():
     password = os.environ.get("YT_PASSWORD")
 
     if not email or not password:
-        print("❌ YT_EMAIL or YT_PASSWORD not set")
+        print("[ERR] YT_EMAIL or YT_PASSWORD not set")
         sys.exit(1)
 
     async with async_playwright() as p:
@@ -21,19 +24,19 @@ async def extract():
         page = await context.new_page()
 
         # الخطوة 1: صفحة اللوجين
-        print("🔄 Going to Google sign in...")
+        print("[*] Going to Google sign in...")
         await page.goto("https://accounts.google.com/signin", wait_until="networkidle")
         await page.wait_for_timeout(2000)
 
         # الخطوة 2: إيميل
-        print("📧 Filling email...")
+        print("[EMAIL] Filling email...")
         await page.wait_for_selector('input[type="email"]', timeout=15000, state="visible")
         await page.fill('input[type="email"]', email)
         await page.keyboard.press("Enter")
         await page.wait_for_timeout(3000)
 
         # الخطوة 3: باسورد - جرب كل الـ selectors
-        print("⏳ Waiting for password field...")
+        print("[WAIT] Waiting for password field...")
         password_selectors = [
             'input[jsname="YPqjbf"]',
             'input[type="password"]:not([aria-hidden="true"])',
@@ -53,14 +56,14 @@ async def extract():
                 continue
 
         if not password_field:
-            print("❌ Could not find password field")
+            print("[ERR] Could not find password field")
             print(f"📍 Current URL: {page.url}")
             await page.screenshot(path="debug_password.png")
             await browser.close()
             sys.exit(1)
 
         # الخطوة 4: اكتب الباسورد
-        print("🔑 Filling password...")
+        print("[PASS] Filling password...")
         await page.fill(password_field, password)
         await page.keyboard.press("Enter")
         await page.wait_for_timeout(5000)
@@ -70,18 +73,18 @@ async def extract():
         print(f"📍 Current URL after login: {current_url}")
 
         if "accounts.google.com" in current_url:
-            print("⚠️ Still on Google - possible 2FA or wrong credentials")
+            print("[WARN] Still on Google - possible 2FA or wrong credentials")
             await page.screenshot(path="debug_login.png")
             await browser.close()
             sys.exit(1)
 
         # الخطوة 6: روح على YouTube
-        print("🎬 Going to YouTube...")
+        print("[YT] Going to YouTube...")
         await page.goto("https://www.youtube.com", wait_until="networkidle")
         await page.wait_for_timeout(2000)
 
         # الخطوة 7: robots.txt
-        print("🤖 Going to robots.txt...")
+        print("[BOT] Going to robots.txt...")
         await page.goto("https://www.youtube.com/robots.txt")
         await page.wait_for_timeout(2000)
 
@@ -96,7 +99,7 @@ async def extract():
         print(f"🍪 Found {len(cookies)} cookies")
 
         if len(cookies) == 0:
-            print("❌ No cookies found!")
+            print("[ERR] No cookies found!")
             await browser.close()
             sys.exit(1)
 
