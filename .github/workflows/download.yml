@@ -3,7 +3,7 @@ name: Download YouTube Video
 on:
   workflow_dispatch:
     inputs:
-      video_url:
+      url:
         description: 'YouTube URL'
         required: true
 
@@ -11,17 +11,21 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Setup yt-dlp
+        uses: AnimMouse/setup-yt-dlp@v3
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - name: Setup YouTube cookies
+        uses: AnimMouse/setup-yt-dlp/cookies@v3
         with:
-          python-version: '3.11'
+          cookies: ${{ secrets.YOUTUBE_COOKIES }}
 
-      - name: Install yt-dlp
-        run: pip install yt-dlp
+      - name: Download Video
+        run: |
+          yt-dlp -o "video.%(ext)s" "${{ github.event.inputs.url }}"
 
-      - name: Download video
-        env:
-          VIDEO_URL: ${{ github.event.inputs.video_url }}
-        run: python download.py
+      - name: Upload to Google Drive
+        uses: adityak74/google-drive-upload-git-action@main
+        with:
+          credentials: ${{ secrets.GOOGLE_CREDENTIALS }}
+          filename: "video.*"
+          folderId: ${{ secrets.DRIVE_FOLDER_ID }}
