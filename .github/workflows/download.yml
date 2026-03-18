@@ -24,9 +24,10 @@ jobs:
 
       - name: Send to n8n
         run: |
-          FILE=$(ls video.*)
-          curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
-            -F "video=@$FILE" \
+          FILE=$(ls video.* | head -1)
+          echo "File found: $FILE"
+          curl -v -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
+            -F "video=@${FILE}" \
             -F "url=${{ github.event.inputs.url }}"
 
       - name: Update YouTube cookies
