@@ -1,119 +1,129 @@
-name: Download YouTube Video
-on:
-  workflow_dispatch:
-    inputs:
-      url:
-        description: 'YouTube URL'
-        required: true
+import asyncio
+import os
+import sys
 
-jobs:
-  download:
-    runs-on: windows-latest
-    steps:
 
-      # ── Setup ──────────────────────────────────────────
-      - name: Checkout repo
-        uses: actions/checkout@v4
+async def extract():
+    from playwright.async_api import async_playwright
 
-      - name: Setup yt-dlp
-        uses: AnimMouse/setup-yt-dlp@v3
+    email = os.environ.get("YT_EMAIL")
+    password = os.environ.get("YT_PASSWORD")
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+    if not email or not password:
+        print("❌ YT_EMAIL or YT_PASSWORD not set")
+        sys.exit(1)
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+    async with async_playwright() as p:
+        browser = await p.firefox.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0"
+        )
+        page = await context.new_page()
 
-      # ── Playwright ─────────────────────────────────────
-      - name: Install Playwright + Firefox
-        run: |
-          pip install playwright
-          playwright install firefox --with-deps
+        # الخطوة 1: صفحة اللوجين
+        print("🔄 Going to Google sign in...")
+        await page.goto("https://accounts.google.com/signin", wait_until="networkidle")
+        await page.wait_for_timeout(2000)
 
-      # ── Refresh Cookies ────────────────────────────────
-      - name: Refresh YouTube Cookies
-        env:
-          YT_EMAIL: ${{ secrets.YT_EMAIL }}
-          YT_PASSWORD: ${{ secrets.YT_PASSWORD }}
-        run: python scripts/refresh_cookies.py
+        # الخطوة 2: إيميل
+        print("📧 Filling email...")
+        await page.wait_for_selector('input[type="email"]', timeout=15000, state="visible")
+        await page.fill('input[type="email"]', email)
+        await page.keyboard.press("Enter")
+        await page.wait_for_timeout(3000)
 
-      - name: Save Cookies to GitHub Secret
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        shell: bash
-        run: |
-          COOKIES_B64=$(base64 -w 0 cookies.txt)
-          gh secret set YOUTUBE_COOKIES \
-            --body "$COOKIES_B64" \
-            --repo ${{ github.repository }}
-          echo "✅ Cookies saved to GitHub Secret"
+        # الخطوة 3: باسورد - جرب كل الـ selectors
+        print("⏳ Waiting for password field...")
+        password_selectors = [
+            'input[jsname="YPqjbf"]',
+            'input[type="password"]:not([aria-hidden="true"])',
+            'input[name="Passwd"]',
+            'input[autocomplete="current-password"]',
+        ]
 
-      # ── POT Provider ───────────────────────────────────
-      - name: Install bgutil POT Provider
-        shell: bash
-        run: |
-          pip install bgutil-ytdlp-pot-provider
-          git clone --single-branch --branch 1.3.1 \
-            https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git \
-            "$USERPROFILE/bgutil-ytdlp-pot-provider"
-          cd "$USERPROFILE/bgutil-ytdlp-pot-provider/server/"
-          npm ci
-          npx tsc
+        password_field = None
+        for selector in password_selectors:
+            try:
+                await page.wait_for_selector(selector, timeout=5000, state="visible")
+                password_field = selector
+                print(f"✅ Found password field: {selector}")
+                break
+            except Exception:
+                print(f"⚠️ Selector not found: {selector}")
+                continue
 
-      - name: Start POT Server
-        shell: bash
-        run: |
-          cd "$USERPROFILE/bgutil-ytdlp-pot-provider/server/"
-          node build/main.js &
-          sleep 5
+        if not password_field:
+            print("❌ Could not find password field")
+            print(f"📍 Current URL: {page.url}")
+            await page.screenshot(path="debug_password.png")
+            await browser.close()
+            sys.exit(1)
 
-      # ── Download ───────────────────────────────────────
-      - name: Download Video
-        shell: bash
-        run: |
-          rm -f "$APPDATA/yt-dlp/config" "$USERPROFILE/.config/yt-dlp/config" || true
-          python scripts/download.py "${{ github.event.inputs.url }}"
+        # الخطوة 4: اكتب الباسورد
+        print("🔑 Filling password...")
+        await page.fill(password_field, password)
+        await page.keyboard.press("Enter")
+        await page.wait_for_timeout(5000)
 
-      # ── Send to n8n ────────────────────────────────────
-      - name: Send video to n8n
-        if: success()
-        shell: bash
-        run: |
-          FILE=$(ls video.* | head -1)
-          echo "📤 Sending: $FILE"
-          curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
-            -F "video=@${FILE}" \
-            -F "url=${{ github.event.inputs.url }}" \
-            -F "status=success"
+        # الخطوة 5: تأكد إنه دخل
+        current_url = page.url
+        print(f"📍 Current URL after login: {current_url}")
 
-      # ── Notify Cookies Refreshed ───────────────────────
-      - name: Notify cookies refreshed
-        if: always()
-        shell: bash
-        run: |
-          COOKIE_COUNT=$(grep -c "youtube\|google" cookies.txt 2>/dev/null || echo "0")
-          curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"status\": \"cookies_refreshed\",
-              \"cookie_count\": ${COOKIE_COUNT},
-              \"time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
-              \"video_url\": \"${{ github.event.inputs.url }}\"
-            }"
+        if "accounts.google.com" in current_url:
+            print("⚠️ Still on Google - possible 2FA or wrong credentials")
+            await page.screenshot(path="debug_login.png")
+            await browser.close()
+            sys.exit(1)
 
-      # ── Error ──────────────────────────────────────────
-      - name: Send error to n8n
-        if: failure()
-        shell: bash
-        run: |
-          curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"status\": \"error\",
-              \"url\": \"${{ github.event.inputs.url }}\",
-              \"message\": \"Workflow failed - check GitHub Actions logs\"
-            }"
+        # الخطوة 6: روح على YouTube
+        print("🎬 Going to YouTube...")
+        await page.goto("https://www.youtube.com", wait_until="networkidle")
+        await page.wait_for_timeout(2000)
+
+        # الخطوة 7: robots.txt
+        print("🤖 Going to robots.txt...")
+        await page.goto("https://www.youtube.com/robots.txt")
+        await page.wait_for_timeout(2000)
+
+        # الخطوة 8: استخرج الـ cookies
+        cookies = await context.cookies([
+            "https://youtube.com",
+            "https://www.youtube.com",
+            "https://google.com",
+            "https://www.google.com",
+        ])
+
+        print(f"🍪 Found {len(cookies)} cookies")
+
+        if len(cookies) == 0:
+            print("❌ No cookies found!")
+            await browser.close()
+            sys.exit(1)
+
+        # الخطوة 9: حول لـ Netscape format
+        lines = ["# Netscape HTTP Cookie File\n"]
+        for c in cookies:
+            domain = c["domain"]
+            include_subdomain = "TRUE" if domain.startswith(".") else "FALSE"
+            secure = "TRUE" if c.get("secure") else "FALSE"
+            expires = int(c.get("expires", 0))
+            if expires < 0:
+                expires = 0
+            lines.append(
+                f"{domain}\t"
+                f"{include_subdomain}\t"
+                f"{c['path']}\t"
+                f"{secure}\t"
+                f"{expires}\t"
+                f"{c['name']}\t"
+                f"{c['value']}\n"
+            )
+
+        with open("cookies.txt", "w") as f:
+            f.writelines(lines)
+
+        await browser.close()
+        print(f"✅ Cookies saved! ({len(cookies)} cookies)")
+
+
+asyncio.run(extract())
