@@ -11,19 +11,90 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
+      # 1. Setup yt-dlp
       - name: Setup yt-dlp
         uses: AnimMouse/setup-yt-dlp@v3
 
-      - name: Setup YouTube cookies
-        uses: AnimMouse/setup-yt-dlp/cookies@v3
-        with:
-          cookies: ${{ secrets.YOUTUBE_COOKIES }}
-
+      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # 3. Setup Python + Playwright
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 4. Install Playwright + Firefox
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install firefox
+
+      # 5. تجديد الـ Cookies تلقائياً
+      - name: Refresh YouTube Cookies
+        env:
+          YT_EMAIL: ${{ secrets.YT_EMAIL }}
+          YT_PASSWORD: ${{ secrets.YT_PASSWORD }}
+        run: |
+          cat << 'EOF' > extract_cookies.py
+          import asyncio, os
+          from playwright.async_api import async_playwright
+
+          async def extract():
+              async with async_playwright() as p:
+                  browser = await p.firefox.launch(headless=True)
+                  context = await browser.new_context()
+                  page = await context.new_page()
+
+                  await page.goto("https://accounts.google.com/signin")
+                  await page.fill('input[type="email"]', os.environ["YT_EMAIL"])
+                  await page.click('button:has-text("Next")')
+                  await page.wait_for_timeout(2000)
+                  await page.fill('input[type="password"]', os.environ["YT_PASSWORD"])
+                  await page.click('button:has-text("Next")')
+                  await page.wait_for_timeout(3000)
+
+                  await page.goto("https://www.youtube.com/robots.txt")
+                  await page.wait_for_timeout(2000)
+
+                  cookies = await context.cookies(["https://youtube.com"])
+
+                  lines = ["# Netscape HTTP Cookie File\n"]
+                  for c in cookies:
+                      lines.append(
+                          f"{c['domain']}\t"
+                          f"{'TRUE' if c['domain'].startswith('.') else 'FALSE'}\t"
+                          f"{c['path']}\t"
+                          f"{'TRUE' if c.get('secure') else 'FALSE'}\t"
+                          f"{int(c.get('expires', 0))}\t"
+                          f"{c['name']}\t"
+                          f"{c['value']}\n"
+                      )
+
+                  with open("cookies.txt", "w") as f:
+                      f.writelines(lines)
+
+                  await browser.close()
+                  print(f"✅ Extracted {len(cookies)} cookies")
+
+          asyncio.run(extract())
+          EOF
+          python extract_cookies.py
+
+      # 6. حفظ الـ Cookies في GitHub Secret
+      - name: Save Cookies to Secret
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          COOKIES_B64=$(base64 -w 0 cookies.txt)
+          gh secret set YOUTUBE_COOKIES \
+            --body "$COOKIES_B64" \
+            --repo ${{ github.repository }}
+
+      # 7. Install bgutil POT Provider
       - name: Install bgutil POT Provider
         run: |
           pip install bgutil-ytdlp-pot-provider
@@ -34,35 +105,47 @@ jobs:
           npm ci
           npx tsc
 
+      # 8. Start POT Server
       - name: Start POT Server
         run: |
           cd ~/bgutil-ytdlp-pot-provider/server/
           node build/main.js &
           sleep 5
 
+      # 9. تنزيل الفيديو
       - name: Download Video
         run: |
           yt-dlp -v \
-            --cookies ~/.cache/yt-dlp/youtube/cookies.txt \
+            --cookies cookies.txt \
             -o "video.%(ext)s" \
             "${{ github.event.inputs.url }}"
 
-      - name: Update YouTube cookies
-        if: always()
-        uses: AnimMouse/setup-yt-dlp/cookies/update@v3
-        with:
-          cookies_secret_name: YOUTUBE_COOKIES
-          token: ${{ secrets.GH_PAT }}
-
+      # 10. بعت الفيديو لـ n8n
       - name: Send to n8n
         if: success()
         run: |
           FILE=$(ls video.* | head -1)
+          echo "File found: $FILE"
           curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
             -F "video=@${FILE}" \
             -F "url=${{ github.event.inputs.url }}" \
             -F "status=success"
 
+      # 11. تأكيد تجديد الـ Cookies لـ n8n
+      - name: Notify Cookies Refreshed
+        if: always()
+        run: |
+          COOKIE_COUNT=$(grep -c "youtube" cookies.txt 2>/dev/null || echo "0")
+          curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"status\": \"cookies_refreshed\",
+              \"cookie_count\": \"${COOKIE_COUNT}\",
+              \"time\": \"$(date -u)\",
+              \"video_url\": \"${{ github.event.inputs.url }}\"
+            }"
+
+      # 12. بعت error لـ n8n لو فشل
       - name: Send error to n8n
         if: failure()
         run: |
