@@ -23,14 +23,17 @@ jobs:
           cookies: ${{ secrets.YOUTUBE_COOKIES }}
 
       - name: Download Video
-        run: |
-          yt-dlp -o "video.%(ext)s" "${{ github.event.inputs.url }}"
+        run: yt-dlp -o "video.%(ext)s" "${{ github.event.inputs.url }}"
+
+      - name: Install dependencies
+        run: pip install google-auth google-auth-httplib2 google-api-python-client
 
       - name: Upload to Google Drive
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          DRIVE_FOLDER_ID: ${{ github.event.inputs.folder_id }}
         run: |
-          pip install google-auth google-auth-httplib2 google-api-python-client
-
-          python3 << 'EOF'
+          cat > upload.py << 'PYEOF'
           import os
           import json
           import glob
@@ -43,9 +46,7 @@ jobs:
               credentials_json,
               scopes=['https://www.googleapis.com/auth/drive']
           )
-
           service = build('drive', 'v3', credentials=credentials)
-
           files = glob.glob('video.*')
           for file_path in files:
               file_metadata = {
@@ -53,4 +54,17 @@ jobs:
                   'parents': [os.environ['DRIVE_FOLDER_ID']]
               }
               media = MediaFileUpload(file_path, resumable=True)
-              file = service.files().create(
+              result = service.files().create(
+                  body=file_metadata,
+                  media_body=media,
+                  fields='id'
+              ).execute()
+              print(f'Uploaded! ID: {result.get("id")}')
+          PYEOF
+          python3 upload.py
+
+      - name: Update YouTube cookies
+        uses: AnimMouse/setup-yt-dlp/cookies/update@v3
+        with:
+          cookies_secret_name: YOUTUBE_COOKIES
+          token: ${{ secrets.GH_PAT }}
