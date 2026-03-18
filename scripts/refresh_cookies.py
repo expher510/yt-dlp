@@ -20,52 +20,73 @@ async def extract():
         )
         page = await context.new_page()
 
+        # ── الخطوة 1: روح على صفحة اللوجين ──────────────
         print("🔄 Going to Google sign in...")
         await page.goto("https://accounts.google.com/signin", wait_until="networkidle")
         await page.wait_for_timeout(2000)
 
-        # الخطوة 1: إيميل
+        # ── الخطوة 2: إيميل ───────────────────────────────
         print("📧 Filling email...")
-        await page.wait_for_selector('input[type="email"]', timeout=15000)
+        await page.wait_for_selector('input[type="email"]', timeout=15000, state="visible")
         await page.fill('input[type="email"]', email)
         await page.keyboard.press("Enter")
+        await page.wait_for_timeout(3000)
 
-        # استنى صفحة الباسورد
+        # ── الخطوة 3: باسورد ──────────────────────────────
         print("⏳ Waiting for password field...")
-        await page.wait_for_selector('input[type="password"]', timeout=15000)
-        await page.wait_for_timeout(1500)
 
-        # الخطوة 2: باسورد
-        print("🔑 Filling password...")
-        await page.fill('input[type="password"]', password)
-        await page.keyboard.press("Enter")
+        # جرب أكتر من selector عشان Google بيغير الـ HTML
+        password_selectors = [
+            'input[jsname="YPqjbf"]',                           # الـ selector الرسمي
+            'input[type="password"]:not([aria-hidden="true"])',  # مش hidden
+            'input[name="Passwd"]',                              # اسم قديم
+            'input[autocomplete="current-password"]',            # autocomplete
+        ]
 
-        # استنى يدخل
-        print("⏳ Waiting for login...")
-        await page.wait_for_timeout(5000)
+        password_field = None
+        for selector in password_selectors:
+            try:
+                await page.wait_for_selector(selector, timeout=5000, state="visible")
+                password_field = selector
+                print(f"✅ Found password field: {selector}")
+                break
+            except Exception:
+                print(f"⚠️ Selector not found: {selector}")
+                continue
 
-        # تأكد إنه دخل
-        current_url = page.url
-        print(f"📍 Current URL: {current_url}")
-
-        if "accounts.google.com" in current_url:
-            # ممكن في 2FA أو verification
-            print("⚠️ Still on Google accounts page - possible 2FA or verification needed")
-            await page.screenshot(path="login_state.png")
+        if not password_field:
+            print("❌ Could not find password field - taking screenshot for debug")
+            await page.screenshot(path="debug_password.png")
+            print(f"📍 Current URL: {page.url}")
             await browser.close()
             sys.exit(1)
 
-        # روح على YouTube
+        print("🔑 Filling password...")
+        await page.fill(password_field, password)
+        await page.keyboard.press("Enter")
+        await page.wait_for_timeout(5000)
+
+        # ── تأكد إنه دخل ──────────────────────────────────
+        current_url = page.url
+        print(f"📍 Current URL after login: {current_url}")
+
+        if "accounts.google.com" in current_url:
+            print("⚠️ Still on Google - possible 2FA or wrong credentials")
+            await page.screenshot(path="debug_login.png")
+            await browser.close()
+            sys.exit(1)
+
+        # ── الخطوة 4: روح على YouTube ─────────────────────
         print("🎬 Going to YouTube...")
         await page.goto("https://www.youtube.com", wait_until="networkidle")
         await page.wait_for_timeout(2000)
 
-        # روح على robots.txt عشان تحدث الـ cookies
+        # ── الخطوة 5: robots.txt ──────────────────────────
         print("🤖 Going to robots.txt...")
         await page.goto("https://www.youtube.com/robots.txt")
         await page.wait_for_timeout(2000)
 
-        # استخرج الـ cookies
+        # ── الخطوة 6: استخرج الـ cookies ──────────────────
         cookies = await context.cookies([
             "https://youtube.com",
             "https://www.youtube.com",
@@ -75,7 +96,12 @@ async def extract():
 
         print(f"🍪 Found {len(cookies)} cookies")
 
-        # حول لـ Netscape format
+        if len(cookies) == 0:
+            print("❌ No cookies found!")
+            await browser.close()
+            sys.exit(1)
+
+        # ── الخطوة 7: حول لـ Netscape format ──────────────
         lines = ["# Netscape HTTP Cookie File\n"]
         for c in cookies:
             domain = c['domain']
@@ -99,7 +125,7 @@ async def extract():
             f.writelines(lines)
 
         await browser.close()
-        print(f"✅ Cookies saved to cookies.txt ({len(cookies)} cookies)")
+        print(f"✅ Cookies saved! ({len(cookies)} cookies)")
 
 
 asyncio.run(extract())
