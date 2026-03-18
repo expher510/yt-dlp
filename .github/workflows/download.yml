@@ -30,9 +30,18 @@ jobs:
           token: ${{ secrets.GH_PAT }}
 
       - name: Send to n8n
+        if: success()
         run: |
           FILE=$(ls video.* | head -1)
           echo "File found: $FILE"
-          curl -v -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
+          curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
             -F "video=@${FILE}" \
-            -F "url=${{ github.event.inputs.url }}"
+            -F "url=${{ github.event.inputs.url }}" \
+            -F "status=success"
+
+      - name: Send error to n8n
+        if: failure()
+        run: |
+          curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\": \"error\", \"url\": \"${{ github.event.inputs.url }}\", \"message\": \"Download failed - cookies may have expired\"}"
