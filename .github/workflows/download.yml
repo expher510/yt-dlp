@@ -1,5 +1,4 @@
 name: Download YouTube Video
-
 on:
   workflow_dispatch:
     inputs:
@@ -11,24 +10,42 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
+
+      # 1. تثبيت yt-dlp أحدث نسخة
       - name: Setup yt-dlp
         uses: AnimMouse/setup-yt-dlp@v3
 
-      - name: Setup YouTube cookies
-        uses: AnimMouse/setup-yt-dlp/cookies@v3
+      # 2. تثبيت Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          cookies: ${{ secrets.YOUTUBE_COOKIES }}
+          node-version: '20'
 
+      # 3. تثبيت POT Provider plugin
+      - name: Install bgutil POT Provider
+        run: |
+          pip install bgutil-ytdlp-pot-provider
+          git clone --single-branch --branch 1.3.1 \
+            https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
+          cd bgutil-ytdlp-pot-provider/server/
+          npm ci
+          npx tsc
+
+      # 4. تشغيل السيرفر في الخلفية
+      - name: Start POT Provider Server
+        run: |
+          cd bgutil-ytdlp-pot-provider/server/
+          node build/main.js &
+          sleep 3  # استنى يشتغل
+
+      # 5. تنزيل الفيديو
       - name: Download Video
-        run: yt-dlp -o "video.%(ext)s" "${{ github.event.inputs.url }}"
+        run: |
+          yt-dlp -v \
+            -o "video.%(ext)s" \
+            "${{ github.event.inputs.url }}"
 
-      - name: Update YouTube cookies
-        if: always()
-        uses: AnimMouse/setup-yt-dlp/cookies/update@v3
-        with:
-          cookies_secret_name: YOUTUBE_COOKIES
-          token: ${{ secrets.GH_PAT }}
-
+      # 6. إرسال لـ n8n
       - name: Send to n8n
         if: success()
         run: |
@@ -39,9 +56,10 @@ jobs:
             -F "url=${{ github.event.inputs.url }}" \
             -F "status=success"
 
+      # 7. إرسال error لـ n8n لو فشل
       - name: Send error to n8n
         if: failure()
         run: |
           curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
-            -d "{\"status\": \"error\", \"url\": \"${{ github.event.inputs.url }}\", \"message\": \"Download failed - cookies may have expired\"}"
+            -d "{\"status\": \"error\", \"url\": \"${{ github.event.inputs.url }}\"}"
