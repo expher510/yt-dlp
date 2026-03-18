@@ -25,43 +25,13 @@ jobs:
       - name: Download Video
         run: yt-dlp -o "video.%(ext)s" "${{ github.event.inputs.url }}"
 
-      - name: Install dependencies
-        run: pip install google-auth google-auth-httplib2 google-api-python-client
-
-      - name: Upload to Google Drive
-        env:
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-          DRIVE_FOLDER_ID: ${{ github.event.inputs.folder_id }}
+      - name: Send to n8n
         run: |
-          cat > upload.py << 'PYEOF'
-          import os
-          import json
-          import glob
-          from google.oauth2 import service_account
-          from googleapiclient.discovery import build
-          from googleapiclient.http import MediaFileUpload
-
-          credentials_json = json.loads(os.environ['GOOGLE_CREDENTIALS'])
-          credentials = service_account.Credentials.from_service_account_info(
-              credentials_json,
-              scopes=['https://www.googleapis.com/auth/drive']
-          )
-          service = build('drive', 'v3', credentials=credentials)
-          files = glob.glob('video.*')
-          for file_path in files:
-              file_metadata = {
-                  'name': os.path.basename(file_path),
-                  'parents': [os.environ['DRIVE_FOLDER_ID']]
-              }
-              media = MediaFileUpload(file_path, resumable=True)
-              result = service.files().create(
-                  body=file_metadata,
-                  media_body=media,
-                  fields='id'
-              ).execute()
-              print(f'Uploaded! ID: {result.get("id")}')
-          PYEOF
-          python3 upload.py
+          FILE=$(ls video.*)
+          curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
+            -F "video=@$FILE" \
+            -F "folder_id=${{ github.event.inputs.folder_id }}" \
+            -F "url=${{ github.event.inputs.url }}"
 
       - name: Update YouTube cookies
         uses: AnimMouse/setup-yt-dlp/cookies/update@v3
