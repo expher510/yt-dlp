@@ -6,6 +6,9 @@ on:
       url:
         description: 'YouTube URL'
         required: true
+      folder_id:
+        description: 'Google Drive Folder ID'
+        required: true
 
 jobs:
   download:
@@ -24,8 +27,30 @@ jobs:
           yt-dlp -o "video.%(ext)s" "${{ github.event.inputs.url }}"
 
       - name: Upload to Google Drive
-        uses: adityak74/google-drive-upload-git-action@main
-        with:
-          credentials: ${{ secrets.GOOGLE_CREDENTIALS }}
-          filename: "video.*"
-          folderId: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          pip install google-auth google-auth-httplib2 google-api-python-client
+
+          python3 << 'EOF'
+          import os
+          import json
+          import glob
+          from google.oauth2 import service_account
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaFileUpload
+
+          credentials_json = json.loads(os.environ['GOOGLE_CREDENTIALS'])
+          credentials = service_account.Credentials.from_service_account_info(
+              credentials_json,
+              scopes=['https://www.googleapis.com/auth/drive']
+          )
+
+          service = build('drive', 'v3', credentials=credentials)
+
+          files = glob.glob('video.*')
+          for file_path in files:
+              file_metadata = {
+                  'name': os.path.basename(file_path),
+                  'parents': [os.environ['DRIVE_FOLDER_ID']]
+              }
+              media = MediaFileUpload(file_path, resumable=True)
+              file = service.files().create(
