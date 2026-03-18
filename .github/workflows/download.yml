@@ -6,9 +6,6 @@ on:
       url:
         description: 'YouTube URL'
         required: true
-      folder_id:
-        description: 'Google Drive Folder ID'
-        required: true
 
 jobs:
   download:
@@ -30,7 +27,6 @@ jobs:
           FILE=$(ls video.*)
           curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
             -F "video=@$FILE" \
-            -F "folder_id=${{ github.event.inputs.folder_id }}" \
             -F "url=${{ github.event.inputs.url }}"
 
       - name: Update YouTube cookies
