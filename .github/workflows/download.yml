@@ -14,6 +14,11 @@ jobs:
       - name: Setup yt-dlp
         uses: AnimMouse/setup-yt-dlp@v3
 
+      - name: Setup YouTube cookies
+        uses: AnimMouse/setup-yt-dlp/cookies@v3
+        with:
+          cookies: ${{ secrets.YOUTUBE_COOKIES }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -28,26 +33,31 @@ jobs:
           cd ~/bgutil-ytdlp-pot-provider/server/
           npm ci
           npx tsc
-          ls build/  # تأكد إن الـ build اتعمل
 
       - name: Start POT Server
         run: |
           cd ~/bgutil-ytdlp-pot-provider/server/
           node build/main.js &
           sleep 5
-          curl -s http://127.0.0.1:4416/ping  # تأكد إن السيرفر شغال
 
       - name: Download Video
         run: |
           yt-dlp -v \
+            --cookies ~/.cache/yt-dlp/youtube/cookies.txt \
             -o "video.%(ext)s" \
             "${{ github.event.inputs.url }}"
+
+      - name: Update YouTube cookies
+        if: always()
+        uses: AnimMouse/setup-yt-dlp/cookies/update@v3
+        with:
+          cookies_secret_name: YOUTUBE_COOKIES
+          token: ${{ secrets.GH_PAT }}
 
       - name: Send to n8n
         if: success()
         run: |
           FILE=$(ls video.* | head -1)
-          echo "File found: $FILE"
           curl -X POST "${{ secrets.N8N_WEBHOOK_URL }}" \
             -F "video=@${FILE}" \
             -F "url=${{ github.event.inputs.url }}" \
