@@ -28,16 +28,17 @@ jobs:
           git clone --single-branch --branch 1.3.1 \
             https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
           cd bgutil-ytdlp-pot-provider/server/
-          npm ci
-          npx tsc
+          npm install
+          npm run build        # ← بدل npx tsc
+          ls build/            # تأكد إن الـ build اتعمل
 
       # 4. تشغيل السيرفر في الخلفية
       - name: Start POT Provider Server
         run: |
-          cd bgutil-ytdlp-pot-provider/server/
+          cd /home/runner/bgutil-ytdlp-pot-provider/server/
           node build/main.js &
-          sleep 3  # استنى يشتغل
-
+          sleep 5
+          curl -s http://localhost:4416  # تأكد إن السيرفر شغال
       # 5. تنزيل الفيديو
       - name: Download Video
         run: |
