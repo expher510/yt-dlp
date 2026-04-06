@@ -1,7 +1,17 @@
 name: YouTube Downloader
 
 on:
-  workflow_dispatch: # لتشغيله يدوياً من علامة تبويب Actions
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'رابط الفيديو'
+        required: true
+      cookies_content:
+        description: 'محتوى الكوكيز (Netscape format)'
+        required: false
+      n8n_webhook:
+        description: 'رابط الويب هوك للرد بالنتيجة'
+        required: false
 
 jobs:
   run-download:
@@ -27,5 +37,9 @@ jobs:
           pip install yt-dlp
 
       - name: Execute Script
-        # لاحظ هنا استخدمنا scripts/download.py لأن هذا هو الاسم في صورتك
+        env:
+          # تمرير المدخلات كمتغيرات بيئة للبايثون
+          VIDEO_URL: ${{ github.event.inputs.video_url }}
+          COOKIES_DATA: ${{ github.event.inputs.cookies_content }}
+          N8N_WEBHOOK: ${{ github.event.inputs.n8n_webhook }}
         run: python scripts/download.py
