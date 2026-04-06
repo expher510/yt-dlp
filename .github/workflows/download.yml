@@ -50,6 +50,7 @@ jobs:
             --merge-output-format mp4 \
             --no-playlist \
             --write-info-json \
+            --remote-components ejs:github \
             "${{ github.event.inputs.video_url }}"
 
           INFO_FILE=$(ls downloads/*.info.json 2>/dev/null | head -1)
