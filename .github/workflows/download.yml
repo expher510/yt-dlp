@@ -47,31 +47,41 @@ jobs:
           echo "video_file=$VIDEO_FILE" >> $GITHUB_OUTPUT
           echo "✅ Downloaded: $VIDEO_FILE"
 
-      - name: Upload video to n8n → Google Drive
-        run: |
-          VIDEO_FILE="${{ steps.download.outputs.video_file }}"
-          FILENAME=$(basename "$VIDEO_FILE")
-          echo "📤 Uploading: $VIDEO_FILE"
-          curl -s -X POST "${{ github.event.inputs.n8n_webhook }}" \
-            -H "Content-Type: application/octet-stream" \
-            -H "X-Filename: $FILENAME" \
-            --data-binary "@$VIDEO_FILE"
-            echo "✅ Upload sent to n8n"
-
-      - name: Cleanup local files
-        if: always()
-        run: |
-          rm -rf downloads/ cookies.txt
-          echo "🗑️ Cleaned up"
-
-      - name: Notify n8n on failure
-        if: failure()
-        run: |
-          curl -s -X POST "${{ github.event.inputs.n8n_webhook }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "status": "error",
-              "message": "Download failed.",
-              "video_url": ${{ toJson(github.event.inputs.video_url) }},
-              "run_id": "${{ github.run_id }}"
-            }'
+        - name: Upload to GitHub Release & notify n8n
+    run: |
+      VIDEO_FILE="${{ steps.download.outputs.video_file }}"
+      FILENAME=$(basename "$VIDEO_FILE")
+      TAG="video-$(date +%s)"
+  
+      # إنشاء Release
+      RELEASE=$(curl -s -X POST \
+        -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+        -H "Content-Type: application/json" \
+        "https://api.github.com/repos/${{ github.repository }}/releases" \
+        -d "{\"tag_name\":\"$TAG\",\"name\":\"$FILENAME\",\"draft\":false}")
+  
+      UPLOAD_URL=$(echo $RELEASE | jq -r '.upload_url' | sed 's/{.*}//')
+      RELEASE_ID=$(echo $RELEASE | jq -r '.id')
+  
+      # رفع الفيديو على الـ Release
+      curl -s -X POST \
+        -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+        -H "Content-Type: video/mp4" \
+        --data-binary "@$VIDEO_FILE" \
+        "${UPLOAD_URL}?name=${FILENAME}" > /dev/null
+  
+      DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/$TAG/$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$FILENAME")"
+  
+      echo "📎 Release URL: $DOWNLOAD_URL"
+  
+      # بعت JSON بس للـ n8n
+      curl -s -X POST "${{ github.event.inputs.n8n_webhook }}" \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"status\": \"success\",
+          \"download_url\": \"$DOWNLOAD_URL\",
+          \"release_id\": \"$RELEASE_ID\",
+          \"filename\": \"$FILENAME\",
+          \"video_url\": \"${{ github.event.inputs.video_url }}\"
+        }"
+      echo "✅ Notified n8n"
