@@ -50,12 +50,13 @@ jobs:
       - name: Upload video to n8n → Google Drive
         run: |
           VIDEO_FILE="${{ steps.download.outputs.video_file }}"
+          FILENAME=$(basename "$VIDEO_FILE")
           echo "📤 Uploading: $VIDEO_FILE"
-
           curl -s -X POST "${{ github.event.inputs.n8n_webhook }}" \
-            -F "file=@$VIDEO_FILE;type=video/mp4"
-
-          echo "✅ Upload sent to n8n"
+            -H "Content-Type: application/octet-stream" \
+            -H "X-Filename: $FILENAME" \
+            --data-binary "@$VIDEO_FILE"
+            echo "✅ Upload sent to n8n"
 
       - name: Cleanup local files
         if: always()
