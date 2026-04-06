@@ -1,44 +1,64 @@
-name: Video Downloader from n8n
+name: YouTube Automation Downloader
 on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'رابط الفيديو من يوتيوب'
+        description: 'رابط الفيديو المرسل من n8n'
         required: true
       cookies_content:
-        description: 'محتوى ملف الكوكيز'
+        description: 'محتوى cookies_txt من الـ JSON'
         required: true
+      n8n_webhook:
+        description: 'رابط الويب هوك لاستقبال النتيجة'
+        required: false
 
 jobs:
-  run-downloader:
+  download-and-process:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.10'
 
       - name: Install Dependencies
         run: |
-          python -m pip install -U yt-dlp
-          # إذا كان الكود بتاعك محتاج مكتبات تانية زي quickjs ضيفها هنا
+          python -m pip install --upgrade pip
+          pip install yt-dlp
+          # أضف أي مكتبات أخرى يحتاجها سكربت البايثون الخاص بك هنا
 
       - name: Create Cookies File
         run: |
-          echo "${{ github.event.inputs.cookies_content }}" > cookies.txt
+          # نستخدم printf لضمان تحويل \n لأسطر حقيقية في ملف cookies.txt
+          printf "%b" "${{ github.event.inputs.cookies_content }}" > cookies.txt
+          
+          # فحص أمان بسيط للتأكد من أن الملف ليس فارغاً
+          if [ -s cookies.txt ]; then
+            echo "✅ Cookies file created and formatted."
+          else
+            echo "❌ Cookies content is empty!"
+            exit 1
+          fi
 
-      - name: Execute Download Script
+      - name: Run Your Download Script
         env:
           VIDEO_URL: ${{ github.event.inputs.video_url }}
+          # السكربت بتاعك بيستخدم GITHUB_ENV لكتابة VIDEO_FILE، جيت هب هيتعامل مع ده تلقائياً
         run: |
-          # تشغيل السكربت بتاعك اللي انت بعتهولي
-          python your_script_name.py
+          # استبدل script.py باسم ملف البايثون اللي عندك في المستودع
+          python script.py
 
-      - name: Upload Video to Telegram or Drive
+      - name: Send Notification to n8n
+        if: always()
         run: |
-          # هنا بنستخدم المتغير اللي الكود بتاعك كتبه في الـ ENV
-          echo "جاري التعامل مع الملف المستخرج: $VIDEO_FILE"
-          # يمكنك إضافة كود الرفع هنا (سواء لـ n8n Webhook أو Telegram)
+          # إرسال حالة العملية واسم الملف لـ n8n
+          curl -X POST "${{ github.event.inputs.n8n_webhook }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "status": "${{ job.status }}",
+            "video_url": "${{ github.event.inputs.video_url }}",
+            "file_name": "'"$VIDEO_FILE"'"
+          }'
