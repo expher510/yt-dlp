@@ -43,13 +43,13 @@ jobs:
             exit 1
           fi
 
-      - name: Run Your Download Script
+      - name: Run Script
         env:
           VIDEO_URL: ${{ github.event.inputs.video_url }}
           # السكربت بتاعك بيستخدم GITHUB_ENV لكتابة VIDEO_FILE، جيت هب هيتعامل مع ده تلقائياً
         run: |
           # استبدل script.py باسم ملف البايثون اللي عندك في المستودع
-          python download.py
+          python scripts/download.py
 
       - name: Send Notification to n8n
         if: always()
