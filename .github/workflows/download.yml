@@ -15,6 +15,10 @@ on:
         description: 'n8n webhook URL to notify on completion'
         required: true
         type: string
+      n8n_upload_webhook:
+        description: 'n8n webhook URL to upload the video file'
+        required: true
+        type: string
 
 jobs:
   download:
@@ -24,13 +28,11 @@ jobs:
     steps:
       - name: Setup yt-dlp (with FFmpeg + aria2 + EJS Node)
         uses: AnimMouse/setup-yt-dlp@v3
-        # EJS Node يحل الـ JS challenge تلقائياً باستخدام Node.js
 
       - name: Decode and save cookies file
         run: |
           echo "${{ github.event.inputs.cookies_b64 }}" | base64 --decode > cookies.txt
           echo "✅ Cookies saved"
-          head -2 cookies.txt
 
       - name: Download video
         id: download
@@ -59,18 +61,44 @@ jobs:
           VIDEO_FILE=$(ls downloads/*.mp4 2>/dev/null | head -1)
           FILE_SIZE=$(stat -c%s "$VIDEO_FILE" 2>/dev/null || echo "0")
 
-          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "title=$TITLE"       >> $GITHUB_OUTPUT
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
-          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
+          echo "channel=$CHANNEL"   >> $GITHUB_OUTPUT
           echo "thumbnail=$THUMBNAIL" >> $GITHUB_OUTPUT
           echo "file_size=$FILE_SIZE" >> $GITHUB_OUTPUT
+          echo "video_file=$VIDEO_FILE" >> $GITHUB_OUTPUT
 
-      - name: Upload video as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: downloaded-video
-          path: downloads/*.mp4
-          retention-days: 1
+          echo "✅ Downloaded: $TITLE ($FILE_SIZE bytes)"
+
+      - name: Upload video to n8n → Google Drive
+        id: upload
+        run: |
+          VIDEO_FILE="${{ steps.download.outputs.video_file }}"
+          echo "📤 Uploading: $VIDEO_FILE"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ github.event.inputs.n8n_upload_webhook }}" \
+            -F "file=@$VIDEO_FILE;type=video/mp4")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ Video uploaded to n8n successfully"
+          else
+            echo "❌ Upload failed with status $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Delete video file to free space
+        if: always()
+        run: |
+          rm -rf downloads/
+          rm -f cookies.txt
+          echo "🗑️ Local files deleted"
 
       - name: Notify n8n - Success
         if: success()
@@ -85,7 +113,7 @@ jobs:
               "thumbnail": ${{ toJson(steps.download.outputs.thumbnail) }},
               "file_size": ${{ toJson(steps.download.outputs.file_size) }},
               "video_url": ${{ toJson(github.event.inputs.video_url) }},
-              "artifact_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              "run_id": "${{ github.run_id }}"
             }'
 
       - name: Notify n8n - Failure
@@ -95,7 +123,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "status": "error",
-              "message": "Download failed. Check GitHub Actions logs.",
+              "message": "Download or upload failed.",
               "video_url": ${{ toJson(github.event.inputs.video_url) }},
-              "artifact_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              "run_id": "${{ github.run_id }}"
             }'
