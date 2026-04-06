@@ -22,6 +22,11 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - name: Install Deno (required for YouTube JS challenge)
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+
       - name: Install yt-dlp and ffmpeg
         run: |
           sudo apt-get update -qq
@@ -31,8 +36,7 @@ jobs:
       - name: Decode and save cookies file
         run: |
           echo "${{ github.event.inputs.cookies_b64 }}" | base64 --decode > cookies.txt
-          echo "✅ Cookies saved:"
-          head -3 cookies.txt
+          echo "✅ Cookies saved"
 
       - name: Download video
         id: download
@@ -48,18 +52,14 @@ jobs:
             --write-info-json \
             "${{ github.event.inputs.video_url }}"
 
-          # Extract video info
           INFO_FILE=$(ls downloads/*.info.json 2>/dev/null | head -1)
           if [ -f "$INFO_FILE" ]; then
-            TITLE=$(python3 -c "import json,sys; d=json.load(open('$INFO_FILE')); print(d.get('title','Unknown'))")
-            DURATION=$(python3 -c "import json,sys; d=json.load(open('$INFO_FILE')); print(d.get('duration',0))")
-            CHANNEL=$(python3 -c "import json,sys; d=json.load(open('$INFO_FILE')); print(d.get('uploader','Unknown'))")
-            THUMBNAIL=$(python3 -c "import json,sys; d=json.load(open('$INFO_FILE')); print(d.get('thumbnail',''))")
+            TITLE=$(python3 -c "import json; d=json.load(open('$INFO_FILE')); print(d.get('title','Unknown'))")
+            DURATION=$(python3 -c "import json; d=json.load(open('$INFO_FILE')); print(d.get('duration',0))")
+            CHANNEL=$(python3 -c "import json; d=json.load(open('$INFO_FILE')); print(d.get('uploader','Unknown'))")
+            THUMBNAIL=$(python3 -c "import json; d=json.load(open('$INFO_FILE')); print(d.get('thumbnail',''))")
           else
-            TITLE="Unknown"
-            DURATION="0"
-            CHANNEL="Unknown"
-            THUMBNAIL=""
+            TITLE="Unknown"; DURATION="0"; CHANNEL="Unknown"; THUMBNAIL=""
           fi
 
           VIDEO_FILE=$(ls downloads/*.mp4 2>/dev/null | head -1)
@@ -70,9 +70,6 @@ jobs:
           echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
           echo "thumbnail=$THUMBNAIL" >> $GITHUB_OUTPUT
           echo "file_size=$FILE_SIZE" >> $GITHUB_OUTPUT
-          echo "video_file=$VIDEO_FILE" >> $GITHUB_OUTPUT
-
-          echo "✅ Downloaded: $TITLE"
 
       - name: Upload video as artifact
         uses: actions/upload-artifact@v4
@@ -94,10 +91,8 @@ jobs:
               "thumbnail": ${{ toJson(steps.download.outputs.thumbnail) }},
               "file_size": ${{ toJson(steps.download.outputs.file_size) }},
               "video_url": ${{ toJson(github.event.inputs.video_url) }},
-              "run_id": "${{ github.run_id }}",
               "artifact_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }'
-          echo "✅ n8n notified successfully"
 
       - name: Notify n8n - Failure
         if: failure()
@@ -108,7 +103,5 @@ jobs:
               "status": "error",
               "message": "Download failed. Check GitHub Actions logs.",
               "video_url": ${{ toJson(github.event.inputs.video_url) }},
-              "run_id": "${{ github.run_id }}",
               "artifact_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }'
-          echo "❌ n8n notified about failure"
