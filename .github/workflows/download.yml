@@ -49,7 +49,7 @@ jobs:
           # السكربت بتاعك بيستخدم GITHUB_ENV لكتابة VIDEO_FILE، جيت هب هيتعامل مع ده تلقائياً
         run: |
           # استبدل script.py باسم ملف البايثون اللي عندك في المستودع
-          python script.py
+          python download.py
 
       - name: Send Notification to n8n
         if: always()
