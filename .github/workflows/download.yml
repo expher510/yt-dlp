@@ -1,22 +1,14 @@
-name: YouTube Automation Downloader
+name: YouTube Downloader
+
 on:
-  workflow_dispatch:
-    inputs:
-      video_url:
-        description: 'رابط الفيديو المرسل من n8n'
-        required: true
-      cookies_content:
-        description: 'محتوى cookies_txt من الـ JSON'
-        required: true
-      n8n_webhook:
-        description: 'رابط الويب هوك لاستقبال النتيجة'
-        required: false
+  workflow_dispatch: # لتشغيله يدوياً من علامة تبويب Actions
 
 jobs:
-  download-and-process:
+  run-download:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -24,41 +16,16 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
+          pip install -r requirements.txt
           pip install yt-dlp
-          # أضف أي مكتبات أخرى يحتاجها سكربت البايثون الخاص بك هنا
 
-      - name: Create Cookies File
-        run: |
-          # نستخدم printf لضمان تحويل \n لأسطر حقيقية في ملف cookies.txt
-          printf "%b" "${{ github.event.inputs.cookies_content }}" > cookies.txt
-          
-          # فحص أمان بسيط للتأكد من أن الملف ليس فارغاً
-          if [ -s cookies.txt ]; then
-            echo "✅ Cookies file created and formatted."
-          else
-            echo "❌ Cookies content is empty!"
-            exit 1
-          fi
-
-      - name: Run Script
-        env:
-          VIDEO_URL: ${{ github.event.inputs.video_url }}
-          # السكربت بتاعك بيستخدم GITHUB_ENV لكتابة VIDEO_FILE، جيت هب هيتعامل مع ده تلقائياً
-        run: |
-          # استبدل script.py باسم ملف البايثون اللي عندك في المستودع
-          python scripts/download.py
-
-      - name: Send Notification to n8n
-        if: always()
-        run: |
-          # إرسال حالة العملية واسم الملف لـ n8n
-          curl -X POST "${{ github.event.inputs.n8n_webhook }}" \
-          -H "Content-Type: application/json" \
-          -d '{
-            "status": "${{ job.status }}",
-            "video_url": "${{ github.event.inputs.video_url }}",
-            "file_name": "'"$VIDEO_FILE"'"
-          }'
+      - name: Execute Script
+        # لاحظ هنا استخدمنا scripts/download.py لأن هذا هو الاسم في صورتك
+        run: python scripts/download.py
