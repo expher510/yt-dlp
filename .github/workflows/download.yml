@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       n8n_webhook:
-        description: 'n8n webhook URL (for file upload AND error notification)'
+        description: 'n8n webhook URL'
         required: true
         type: string
 
@@ -37,49 +37,33 @@ jobs:
             --format "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
             --merge-output-format mp4 \
             --no-playlist \
-            --write-info-json \
             "${{ github.event.inputs.video_url }}"
           VIDEO_FILE=$(ls downloads/*.mp4 2>/dev/null | head -1)
+          FILENAME=$(basename "$VIDEO_FILE")
           echo "video_file=$VIDEO_FILE" >> $GITHUB_OUTPUT
+          echo "filename=$FILENAME" >> $GITHUB_OUTPUT
           echo "✅ Downloaded: $VIDEO_FILE"
 
-      - name: Upload to GitHub Release & notify n8n
+      - name: Upload as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-${{ github.run_id }}
+          path: downloads/*.mp4
+          retention-days: 1
+
+      - name: Notify n8n
         run: |
-            VIDEO_FILE="${{ steps.download.outputs.video_file }}"
-            FILENAME=$(basename "$VIDEO_FILE")
-            TAG="video-$(date +%s)"
-            # اسم آمن للـ URL بدون أحرف خاصة
-            SAFE_FILENAME="video-${TAG}.mp4"
-  
-            RELEASE=$(curl -s -X POST \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Content-Type: application/json" \
-              "https://api.github.com/repos/${{ github.repository }}/releases" \
-              -d "{\"tag_name\":\"$TAG\",\"name\":\"$FILENAME\",\"draft\":false}")
-  
-            UPLOAD_URL=$(echo $RELEASE | jq -r '.upload_url' | sed 's/{.*}//')
-            RELEASE_ID=$(echo $RELEASE | jq -r '.id')
-  
-            # ارفع الملف باسم آمن
-            curl -s -X POST \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Content-Type: video/mp4" \
-              --data-binary "@$VIDEO_FILE" \
-              "${UPLOAD_URL}?name=${SAFE_FILENAME}"
-  
-            DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/$TAG/$SAFE_FILENAME"
-            echo "📎 Release URL: $DOWNLOAD_URL"
-  
-            curl -s -X POST "${{ github.event.inputs.n8n_webhook }}" \
-              -H "Content-Type: application/json" \
-              -d "{
-                \"status\": \"success\",
-                \"download_url\": \"$DOWNLOAD_URL\",
-                \"release_id\": \"$RELEASE_ID\",
-                \"filename\": \"$FILENAME\",
-                \"video_url\": \"${{ github.event.inputs.video_url }}\"
-              }"
-            echo "✅ Notified n8n"
+          curl -s -X POST "${{ github.event.inputs.n8n_webhook }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"status\": \"success\",
+              \"run_id\": \"${{ github.run_id }}\",
+              \"repo\": \"${{ github.repository }}\",
+              \"filename\": \"${{ steps.download.outputs.filename }}\",
+              \"video_url\": \"${{ github.event.inputs.video_url }}\"
+            }"
+          echo "✅ Notified n8n"
+
       - name: Cleanup
         if: always()
         run: |
